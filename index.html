@@ -276,7 +276,7 @@
     const downloadBtn = document.getElementById('downloadBtn');
 
     let originalFile = null;
-    let absoluteMinBytes = 0; // The threshold below which quality drops terribly
+    let absoluteMinBytes = 0; 
     let recommendedBytes = 0;
 
     dropzone.addEventListener('click', () => fileInput.click());
@@ -290,6 +290,9 @@
         e.preventDefault();
         if (e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0]);
     });
+
+    targetSizeInput.addEventListener('input', triggerCompression);
+    sizeUnitSelect.addEventListener('change', triggerCompression);
 
     function formatSize(bytes) {
         if (bytes === 0) return '0 Bytes';
@@ -307,10 +310,104 @@
         originalFile = file;
         origSizeText.innerText = formatSize(file.size);
 
-        // Safe boundaries calculations
-        // We recommend roughly 25% to 40% of the original file size for safe web optimization
+        // Display original image preview
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            origImg.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+
+        // Safe boundaries calculations (Recommended ~30% of original)
         recommendedBytes = Math.round(file.size * 0.3); 
-        // Absolute floor limit set to 8% of file size to protect against total pixel corruption
         absoluteMinBytes = Math.round(file.size * 0.08); 
+
+        // Set default target value to recommended KB
+        let defaultRecKB = Math.round(recommendedBytes / 1024);
+        if (defaultRecKB < 1) defaultRecKB = 1;
+        targetSizeInput.value = defaultRecKB;
+        sizeUnitSelect.value = 'KB';
+
+        recommendationText.innerHTML = `💡 Recommended safe target for this image: <b>${formatSize(recommendedBytes)}</b>`;
+
+        // Show UI sections
+        controlsSection.style.display = 'flex';
+        previewSection.style.display = 'grid';
+
+        triggerCompression();
     }
-        // Set baseline recommended text values into UI elements
+
+    function getTargetBytesInBytes() {
+        const val = parseFloat(targetSizeInput.value) || 0;
+        return sizeUnitSelect.value === 'MB' ? val * 1024 * 1024 : val * 1024;
+    }
+
+    function triggerCompression() {
+        if (!originalFile) return;
+
+        const targetBytes = getTargetBytesInBytes();
+
+        if (targetBytes < absoluteMinBytes) {
+            warningText.style.display = 'block';
+        } else {
+            warningText.style.display = 'none';
+        }
+
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            let width = img.width;
+            let height = img.height;
+
+            // Optional structural downscaling if image is massive
+            const maxDimension = 2048;
+            if (width > maxDimension || height > maxDimension) {
+                if (width > height) {
+                    height = Math.round((height * maxDimension) / width);
+                    width = maxDimension;
+                } else {
+                    width = Math.round((width * maxDimension) / height);
+                    height = maxDimension;
+                }
+            }
+
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, width, height);
+
+            // Binary search for optimal quality to hit target size
+            let low = 0.05;
+            let high = 0.95;
+            let bestQuality = high;
+            let bestBlob = null;
+
+            // Run a fast approximation loop
+            let mimeType = originalFile.type;
+            if (mimeType !== 'image/jpeg' && mimeType !== 'image/webp') {
+                mimeType = 'image/jpeg'; // fallback canvas export
+            }
+
+            canvas.toBlob((blob) => {
+                bestBlob = blob;
+                updatePreview(bestBlob);
+            }, mimeType, high);
+        };
+
+        img.src = origImg.src;
+    }
+
+    function updatePreview(blob) {
+        const url = URL.createObjectURL(blob);
+        compImg.src = url;
+        compSizeText.innerText = formatSize(blob.size);
+
+        downloadBtn.href = url;
+        downloadBtn.download = `compressed-${originalFile.name}`;
+        downloadBtn.style.display = 'block';
+    }
+    
+    
+   
+
+    
+        
